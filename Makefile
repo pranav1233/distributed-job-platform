@@ -51,7 +51,7 @@ fmt: ## Format code
 	uv run ruff check --fix src tests scripts
 
 chaos: ## Chaos test: kill workers, restart the relay and RabbitMQ, assert no job is lost
-	uv run python scripts/chaos_test.py
+	uv run python scripts/chaos_test.py --write-report
 
 bench: ## Load test at 1, 2 and 4 workers, writes docs/BENCHMARKS.md
 	uv run python scripts/load_test.py --workers 1 2 4 --write-report
