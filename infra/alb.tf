@@ -62,3 +62,49 @@ resource "aws_lb_listener" "https" {
     target_group_arn = aws_lb_target_group.api.arn
   }
 }
+
+# Prometheus metrics are served by the API process on /metrics. They are for scrapers inside
+# the VPC, so the public load balancer answers 404 instead of forwarding the path.
+resource "aws_lb_listener_rule" "block_metrics_http" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "application/json"
+      message_body = "{\"error\":{\"code\":\"not_found\",\"message\":\"not found\"}}"
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/metrics"]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "block_metrics_https" {
+  count = var.certificate_arn == "" ? 0 : 1
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "application/json"
+      message_body = "{\"error\":{\"code\":\"not_found\",\"message\":\"not found\"}}"
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/metrics"]
+    }
+  }
+}

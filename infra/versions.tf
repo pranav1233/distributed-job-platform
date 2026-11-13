@@ -12,7 +12,7 @@ terraform {
     }
   }
 
-  # Remote state is strongly recommended because it contains generated passwords.
+  # Remote state is strongly recommended because it contains random passwords.
   # Create the bucket and lock table first, then uncomment.
   #
   # backend "s3" {
