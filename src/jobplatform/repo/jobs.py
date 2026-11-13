@@ -444,21 +444,29 @@ async def requeue_dead(
     return updated, updated or current
 
 
-async def promote_retries(session: AsyncSession, job_ids: Sequence[uuid.UUID]) -> list[JobRecord]:
-    """Relay: retry_scheduled -> queued for rows whose backoff has elapsed (bulk)."""
-    if not job_ids:
-        return []
+async def promote_due_retries(session: AsyncSession, limit: int) -> list[JobRecord]:
+    """Scheduler step: retry_scheduled -> queued once the backoff has elapsed (bulk).
+
+    This must be committed before the matching outbox row is published. If the promotion
+    shared the publishing transaction, a fast worker could receive the message while the
+    job was still retry_scheduled in the committed state, fail its claim and drop it.
+    """
+    due = (
+        select(Job.id)
+        .where(Job.status == JobStatus.RETRY_SCHEDULED.value, Job.available_at <= func.now())
+        .order_by(Job.available_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
     rows = (
         (
             await session.execute(
                 update(Job)
-                .where(
-                    Job.id.in_(job_ids),
-                    Job.status == JobStatus.RETRY_SCHEDULED.value,
-                    Job.available_at <= func.now(),
-                )
+                .where(Job.id.in_(due), Job.status == JobStatus.RETRY_SCHEDULED.value)
                 .values(
-                    status=JobStatus.QUEUED.value, version=Job.version + 1, updated_at=func.now()
+                    status=JobStatus.QUEUED.value,
+                    version=Job.version + 1,
+                    updated_at=func.now(),
                 )
                 .returning(*_JOB_COLS)
                 .execution_options(synchronize_session=False)

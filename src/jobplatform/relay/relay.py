@@ -1,11 +1,12 @@
 """Transactional outbox relay.
 
-One iteration, in a single transaction:
+One iteration. Step 0 is its own committed transaction: retry_scheduled jobs whose backoff
+elapsed become queued. Then, in a single transaction:
   1. SELECT due, unpublished outbox rows FOR UPDATE SKIP LOCKED, so concurrent relays
      take disjoint batches.
-  2. For dispatch rows, promote retry_scheduled jobs whose backoff has elapsed to queued.
-     A dispatch row whose job is no longer queued (cancelled, already running through a
-     duplicate delivery, finished) is dropped as stale instead of published.
+  2. A dispatch row whose job is no longer queued (cancelled, already running through a
+     duplicate delivery, finished) is dropped as stale instead of published. A row whose
+     job is still retry_scheduled is left pending until the scheduler step promotes it.
   3. Publish the rest with publisher confirms, concurrently.
   4. Mark confirmed rows published, record failures, commit.
 
@@ -26,7 +27,7 @@ from jobplatform.config import Settings
 from jobplatform.domain.states import JobStatus
 from jobplatform.messaging.publisher import ConfirmedPublisher
 from jobplatform.repo import jobs as repo
-from jobplatform.repo.records import JobRecord, OutboxRecord
+from jobplatform.repo.records import OutboxRecord
 from jobplatform.runtime import sleep_or_stop
 from jobplatform.service import JobService
 
@@ -55,15 +56,18 @@ class OutboxRelay:
         self._settings = settings
         self._sf = session_factory
         self._publisher = publisher
-        self._jobs = jobs
+        self._jobs = jobs or JobService(session_factory)
 
     async def run_once(self) -> BatchResult:
         result = BatchResult()
+        # Step 1, its own committed transaction: retries whose backoff elapsed become queued.
+        await self._jobs.promote_due_retries(self._settings.relay_batch_size)
+
+        # Step 2: publish. Everything the worker will claim is already committed as queued.
         async with self._sf() as session, session.begin():
             rows = await repo.fetch_due_outbox(session, self._settings.relay_batch_size)
             if not rows:
                 return result
-            promoted = await self._promote(session, rows)
             statuses = await repo.job_statuses(
                 session, [r.job_id for r in rows if r.kind == "dispatch"]
             )
@@ -71,8 +75,10 @@ class OutboxRelay:
             to_publish: list[OutboxRecord] = []
             skipped: dict[str, list[int]] = {}
             for row in rows:
-                if row.kind == "dispatch" and statuses.get(row.job_id) is not JobStatus.QUEUED:
-                    status = statuses.get(row.job_id)
+                status = statuses.get(row.job_id)
+                if row.kind == "dispatch" and status is JobStatus.RETRY_SCHEDULED:
+                    continue  # not promoted yet: leave pending, a later iteration publishes it
+                if row.kind == "dispatch" and status is not JobStatus.QUEUED:
                     reason = f"job_{status.value if status else 'missing'}"
                     skipped.setdefault(reason, []).append(row.id)
                 else:
@@ -98,15 +104,7 @@ class OutboxRelay:
                     metrics.OUTBOX_PUBLISHED.labels(r.kind).inc()
             if failures:
                 metrics.OUTBOX_PUBLISH_ERRORS.inc(len(failures))
-        # Commit succeeded: now invalidate caches for jobs the relay promoted.
-        if self._jobs is not None and promoted:
-            await self._jobs.notify(promoted)
         return result
-
-    async def _promote(self, session: AsyncSession, rows: list[OutboxRecord]) -> list[JobRecord]:
-        return await repo.promote_retries(
-            session, list({r.job_id for r in rows if r.kind == "dispatch"})
-        )
 
     async def _publish_one(self, row: OutboxRecord) -> str | None:
         body = dict(row.payload)

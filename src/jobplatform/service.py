@@ -145,5 +145,11 @@ class JobService:
         await self._notify([updated])
         return updated, current
 
+    async def promote_due_retries(self, limit: int) -> list[JobRecord]:
+        async with self._sf() as session, session.begin():
+            records = await repo.promote_due_retries(session, limit)
+        await self._notify(records)
+        return records
+
     async def notify(self, records: Sequence[JobRecord]) -> None:
         await self._notify(records)

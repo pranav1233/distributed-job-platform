@@ -65,6 +65,9 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX ix_jobs_status ON jobs (status)")
     op.execute(
+        "CREATE INDEX ix_jobs_retry_due ON jobs (available_at) WHERE status = 'retry_scheduled'"
+    )
+    op.execute(
         """
         CREATE TABLE job_events (
             id bigserial PRIMARY KEY,

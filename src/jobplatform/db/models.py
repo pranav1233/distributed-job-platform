@@ -81,6 +81,11 @@ class Job(Base):
             postgresql_where=text("status = 'running'"),
         ),
         Index("ix_jobs_status", "status"),
+        Index(
+            "ix_jobs_retry_due",
+            "available_at",
+            postgresql_where=text("status = 'retry_scheduled'"),
+        ),
     )
 
 
