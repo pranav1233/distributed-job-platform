@@ -153,3 +153,30 @@ async def test_messages_are_persistent_and_prioritised(
         await first.ack()
         await second.ack()
     await wait_for(lambda: True)
+
+
+async def test_reaper_prunes_published_outbox_rows_but_keeps_pending_ones(
+    settings: Settings,
+    service: JobService,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from jobplatform.reaper.reaper import Reaper
+
+    done = await new_job(service)
+    delayed = await new_job(service, delay_seconds=3600)  # stays pending: not yet due
+    publisher = ConfirmedPublisher(settings)
+    await publisher.start()
+    result = await OutboxRelay(settings, session_factory, publisher).run_once()
+    await publisher.close()
+    assert result.published == 1
+
+    keep = settings.model_copy(update={"outbox_retention_seconds": 3600.0})
+    assert await Reaper(keep, service, session_factory).prune_once() == 0  # too recent
+
+    prune_now = settings.model_copy(update={"outbox_retention_seconds": 0.0})
+    assert await Reaper(prune_now, service, session_factory).prune_once() == 1
+
+    async with session_factory() as session:
+        remaining = (await session.execute(text("SELECT job_id FROM outbox"))).scalars().all()
+    assert [str(j) for j in remaining] == [str(delayed.id)]
+    assert str(done.id) not in {str(j) for j in remaining}

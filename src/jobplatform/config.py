@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     worker_metrics_port: int = 9101
 
     # Relay
-    relay_poll_interval_seconds: float = 0.1
+    relay_poll_interval_seconds: float = 0.05
     relay_batch_size: int = 200
     relay_metrics_port: int = 9102
 
@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     reaper_batch_size: int = 200
     reaper_metrics_port: int = 9103
     stats_interval_seconds: float = 5.0
+    outbox_retention_seconds: float = 3600.0
+    outbox_prune_batch: int = 5000
 
     # Messaging
     exchange_name: str = "jobs"

@@ -137,6 +137,11 @@ class Outbox(Base):
             "id",
             postgresql_where=text("published_at IS NULL"),
         ),
+        Index(
+            "ix_outbox_published",
+            "published_at",
+            postgresql_where=text("published_at IS NOT NULL"),
+        ),
     )
 
 

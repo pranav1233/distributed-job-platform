@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, func, insert, select, text, update
+from sqlalchemy import ColumnElement, delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -606,6 +606,22 @@ async def mark_outbox_skipped(session: AsyncSession, ids: Sequence[int], reason:
             .where(Outbox.id.in_(ids))
             .values(published_at=func.now(), skipped_reason=reason)
         )
+
+
+async def prune_outbox(session: AsyncSession, retention_seconds: float, limit: int) -> int:
+    """Delete outbox rows that were published longer than `retention_seconds` ago."""
+    stale = (
+        select(Outbox.id)
+        .where(
+            Outbox.published_at.is_not(None),
+            Outbox.published_at < func.now() - _interval(retention_seconds),
+        )
+        .order_by(Outbox.published_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    result = await session.execute(delete(Outbox).where(Outbox.id.in_(stale)))
+    return int(result.rowcount)  # type: ignore[attr-defined]
 
 
 async def mark_outbox_failed(session: AsyncSession, failures: dict[int, str]) -> None:

@@ -49,6 +49,20 @@ class Reaper:
             )
         return len(records)
 
+    async def prune_once(self) -> int:
+        """Housekeeping: published outbox rows are only needed for a short debugging window."""
+        total = 0
+        while True:
+            async with self._sf() as session, session.begin():
+                n = await repo.prune_outbox(
+                    session,
+                    self._settings.outbox_retention_seconds,
+                    self._settings.outbox_prune_batch,
+                )
+            total += n
+            if n < self._settings.outbox_prune_batch:
+                return total
+
     async def collect_stats(self) -> None:
         async with self._sf() as session:
             stats = await repo.platform_stats(session)
@@ -81,6 +95,7 @@ class Reaper:
                     reclaimed = await self.reclaim_once()
                     if time.monotonic() >= next_stats:
                         await self.collect_stats()
+                        await self.prune_once()
                         next_stats = time.monotonic() + self._settings.stats_interval_seconds
                     if reclaimed >= self._settings.reaper_batch_size:
                         continue
