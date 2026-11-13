@@ -16,7 +16,7 @@ ALB, Secrets Manager, CloudWatch logs and alarms.
 
 ## 1. Remote state (recommended)
 
-Terraform state contains the generated database and broker passwords. Keep it encrypted.
+Terraform state contains the random database and broker passwords. Keep it encrypted.
 
 ```bash
 aws s3api create-bucket --bucket YOUR-TFSTATE-BUCKET --region us-east-1

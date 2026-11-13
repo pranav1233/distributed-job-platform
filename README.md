@@ -142,7 +142,7 @@ A claim sets `lease_owner` and `lease_expires_at` (database clock). The worker e
 | Store | Holds | Why it was chosen | Failure impact |
 | --- | --- | --- | --- |
 | PostgreSQL | Jobs, audit events, outbox, API key hashes, side-effect table | Transactions make the state machine, the outbox and the audit log atomic. It is the only source of truth. | Writes stop. Nothing already committed is lost. |
-| RabbitMQ | Dispatch intent, priority ordering, dead-letter exchange | Low-latency push delivery with prefetch, priorities, manual acks and DLX. Holds no state that cannot be regenerated from Postgres. | New work waits in the outbox. In-flight work continues. |
+| RabbitMQ | Dispatch intent, priority ordering, dead-letter exchange | Low-latency push delivery with prefetch, priorities, manual acks and DLX. Holds no state that cannot be rebuilt from Postgres. | New work waits in the outbox. In-flight work continues. |
 | Redis | Token buckets, job read cache, stampede locks | Atomic Lua scripts and sub-millisecond reads. Everything in it is disposable. | Rate limiting fails open, reads fall back to Postgres. |
 
 At larger scale: read replicas and PgBouncer in front of Postgres, time partitioning for `jobs`, `job_events` and `outbox`; RabbitMQ quorum queues in a cluster, or Kafka, SQS or Pulsar when throughput outgrows one broker; Redis Cluster, or rate limiting at the edge (API gateway or WAF).
