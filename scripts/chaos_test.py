@@ -2,8 +2,8 @@
 """Chaos test for the job platform.
 
 Brings up the docker compose stack with short leases, submits thousands of jobs while it
-randomly SIGKILLs workers, then SIGKILLs the API, restarts Redis, SIGKILLs the relay,
-restarts RabbitMQ and SIGKILLs the reaper. When everything has settled it asserts, directly
+randomly SIGKILLs workers, restarts PostgreSQL, SIGKILLs the API, restarts Redis, SIGKILLs the
+relay, restarts RabbitMQ and SIGKILLs the reaper. When everything has settled it asserts, directly
 against PostgreSQL:
 
   1. zero lost jobs (every job the API acknowledged exists)
@@ -177,11 +177,12 @@ async def chaos_driver(
 ) -> None:
     """Scheduled infrastructure faults plus a steady random worker kill rate."""
     schedule = [
-        (0.30, "api"),
-        (0.45, "redis"),
-        (0.60, "relay"),
-        (0.75, "rabbitmq"),
-        (0.90, "reaper"),
+        (0.20, "postgres"),
+        (0.35, "api"),
+        (0.47, "redis"),
+        (0.58, "relay"),
+        (0.70, "rabbitmq"),
+        (0.82, "reaper"),
     ]
 
     async def faults() -> None:
@@ -189,7 +190,7 @@ async def chaos_driver(
             await asyncio.sleep(max(0.0, started + frac * submit_seconds - time.monotonic()))
             if done.is_set():
                 return
-            if service in ("redis", "rabbitmq"):
+            if service in ("redis", "rabbitmq", "postgres"):
                 await restart(service, chaos, started)
             else:
                 await sigkill(service, chaos, started, downtime=3.0)
@@ -418,7 +419,7 @@ async def main_async(args: argparse.Namespace) -> int:
     elapsed = time.monotonic() - started
 
     # make sure nothing is left stopped before verifying
-    for service in ("api", "worker", "relay", "reaper", "redis", "rabbitmq"):
+    for service in ("api", "worker", "relay", "reaper", "redis", "rabbitmq", "postgres"):
         for cid in await container_ids(service):
             await arun(["docker", "start", cid])
 
@@ -492,7 +493,7 @@ def write_report(result: dict[str, Any], path: Path) -> None:
         "## Faults injected",
         "",
         f"- {result['worker_kills']} random worker SIGKILLs (each restarted 1 to 3 seconds later)",
-        "- One SIGKILL each of the API, relay and reaper, one restart each of Redis and RabbitMQ",
+        "- One SIGKILL each of the API, relay and reaper, one restart each of PostgreSQL, Redis and RabbitMQ",
         "",
         "```",
         *result["timeline"],
